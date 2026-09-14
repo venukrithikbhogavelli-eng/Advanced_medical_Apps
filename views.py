@@ -119,7 +119,9 @@ def _show_list(title, values, icon="•"):
 
 def render_response(view_mode, result):
     st.divider()
-
+    if result.get("_intent"):
+        st.caption(f"🧭 Workflow: `{result['_intent'].replace('_', ' ').title()}`")
+        
     if not isinstance(result, dict):
         st.error("The AI returned an unexpected response format.")
         return

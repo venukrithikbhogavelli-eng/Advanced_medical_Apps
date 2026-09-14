@@ -208,8 +208,12 @@ class MedicalAgentModel:
     # PROMPTS
     # -----------------------------
 
-
-    def build_system_prompt(self, view_mode: str, response_type: str) -> str:
+    def build_system_prompt(
+        self,
+        view_mode: str,
+        response_type: str,
+        intent: str,
+    ) -> str:
         if view_mode == "Doctor (Technical)":
             audience = (
                 "Use concise clinical terminology suitable for a clinician. "
@@ -220,6 +224,34 @@ class MedicalAgentModel:
                 "Use plain, calm language suitable for a patient. Explain important "
                 "medical terms briefly and avoid unnecessary alarm."
             )
+        intent_instructions = {
+            "GENERAL_MEDICAL": (
+                "Answer a general medical knowledge question. "
+                "Do not assume a patient exists."
+            ),
+            "CLINICAL_ANALYSIS": (
+                "Analyze the uploaded clinical evidence and identify "
+                "the most relevant documented findings."
+            ),
+            "IMAGE_ANALYSIS": (
+                "Focus on observations visible in the uploaded medical image. "
+                "Clearly distinguish observations from interpretation and "
+                "state important image limitations."
+            ),
+            "DOCUMENT_SUMMARY": (
+                "Summarize the uploaded medical document accurately. "
+                "Prioritize documented diagnoses, findings, laboratory results, "
+                "dates, and clinically important information."
+            ),
+            "FOLLOW_UP": (
+                "Answer the user's follow-up question using the available "
+                "clinical context and uploaded evidence. Do not invent missing facts."
+            ),
+        }
+
+        intent_instruction = intent_instructions.get(
+            intent, "Analyze the request using the available evidence."
+        )
 
         if response_type == "general":
             return f"""
@@ -230,6 +262,7 @@ AUDIENCE: {view_mode}
 {audience}
 
 TASK:
+{intent_instruction}
 Answer the user's question directly and educationally. Do not pretend that a patient
 exists and do not create patient/document information. Give a useful, well-organized
 explanation appropriate to the question. Cover the most relevant concepts, common
@@ -257,6 +290,11 @@ You are analyzing uploaded medical evidence supplied in this request.
 
 AUDIENCE: {view_mode}
 {audience}
+INTENT:
+{intent}
+
+WORKFLOW INSTRUCTION:
+{intent_instruction}
 
 SAFETY AND EVIDENCE RULES:
 1. Never invent patient information, dates, diagnoses, symptoms, medications,
@@ -293,54 +331,45 @@ Prefer a small number of high-value findings over repetition.
                 "Do not invent patient-specific information. "
                 "Do not force the answer into a clinical report. "
                 "Explain the topic clearly and accurately."
-        )
+            )
         else:
             instruction = (
                 "Analyze the uploaded medical evidence only. "
                 "Extract explicit patient and document information. "
                 "Provide the most relevant findings and correlations. "
                 "Do not fill missing fields by guessing."
-        )
-        text_content = (
-            "USER REQUEST:\n"
-            + prompt
-            + "\n\n"
-            + instruction
-        )
+            )
+        text_content = "USER REQUEST:\n" + prompt + "\n\n" + instruction
 
         content = [
-        {
-            "type": "text",
-            "text": text_content,
-        }
+            {
+                "type": "text",
+                "text": text_content,
+            }
         ]
         if pdf_context:
             content.append(
-            {
-                "type": "text",
-                "text": "UPLOADED PDF TEXT:\n" + pdf_context,
-            }
-        )
+                {
+                    "type": "text",
+                    "text": "UPLOADED PDF TEXT:\n" + pdf_context,
+                }
+            )
 
         if uploaded_image:
             content.append(
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": self.get_image_data_url(uploaded_image)
-                },
-            }
-        )
+                {
+                    "type": "image_url",
+                    "image_url": {"url": self.get_image_data_url(uploaded_image)},
+                }
+            )
 
         for data_url in pdf_image_urls or []:
             content.append(
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": data_url
-                },
-            }
-        )
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                }
+            )
 
         return content
 
@@ -354,6 +383,8 @@ Prefer a small number of high-value findings over repetition.
         prompt: str,
         uploaded_image=None,
         uploaded_pdf=None,
+        intent: str = "CLINICAL_ANALYSIS",
+        response_type: str = "clinical",
     ) -> dict:
         request_id = str(uuid.uuid4())
 
@@ -361,14 +392,19 @@ Prefer a small number of high-value findings over repetition.
             raise ValueError("Please provide a question or upload a medical file.")
 
         has_uploaded_evidence = bool(uploaded_image or uploaded_pdf)
-        response_type = "clinical" if has_uploaded_evidence else "general"
         pdf_context, pdf_images = self.build_pdf_context(uploaded_pdf)
-
         if not has_uploaded_evidence:
             pdf_context = ""
 
         messages = [
-            {"role": "system", "content": self.build_system_prompt(view_mode, response_type)},
+            {
+                "role": "system",
+                "content": self.build_system_prompt(
+                    view_mode=view_mode,
+                    response_type=response_type,
+                    intent=intent,
+                ),
+            },
             {
                 "role": "user",
                 "content": self.build_user_content(
@@ -442,4 +478,5 @@ Prefer a small number of high-value findings over repetition.
 
         result["_request_id"] = request_id
         result["_model"] = self.model_name
+        result["_intent"] = intent
         return result
