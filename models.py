@@ -208,6 +208,7 @@ class MedicalAgentModel:
     # PROMPTS
     # -----------------------------
 
+
     def build_system_prompt(self, view_mode: str, response_type: str) -> str:
         if view_mode == "Doctor (Technical)":
             audience = (
